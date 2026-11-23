@@ -4,17 +4,18 @@ const { COLORS, EMOJIS, PRIORITIES } = require('../config/constants');
 
 class LogService {
   /**
-   * Récupère le salon de log configuré pour le serveur
+   * Récupère le salon de log configuré (sur le serveur local ou un serveur externe comme le serveur Staff)
    * @param {import('discord.js').Guild} guild 
    * @returns {Promise<import('discord.js').TextChannel|null>}
    */
   async getLogChannel(guild) {
-    if (!guild) return null;
+    if (!guild || !guild.client) return null;
     const config = configRepository.getGuildConfig(guild.id);
     if (!config || !config.log_channel_id) return null;
 
     try {
-      const channel = await guild.channels.fetch(config.log_channel_id).catch(() => null);
+      // client.channels.fetch permet de trouver le salon même s'il se trouve sur un autre serveur (ex: Serveur Staff)
+      const channel = await guild.client.channels.fetch(config.log_channel_id).catch(() => null);
       if (channel && channel.isTextBased()) return channel;
     } catch {
       return null;
@@ -33,6 +34,7 @@ class LogService {
       .setColor(COLORS.SUCCESS)
       .setTitle(`${EMOJIS.TICKET} Ticket Ouvert`)
       .addFields(
+        { name: '🌐 Serveur', value: `**${guild.name}** (\`${guild.id}\`)`, inline: true },
         { name: '🎫 Ticket', value: `<#${channel.id}> (\`#${String(ticket.ticket_number).padStart(4, '0')}\`)`, inline: true },
         { name: '👤 Utilisateur', value: `<@${user.id}> (\`${user.id}\`)`, inline: true },
         { name: '📂 Catégorie', value: `${category.emoji || ''} ${category.label}`, inline: true },
@@ -54,6 +56,7 @@ class LogService {
       .setColor(COLORS.INFO)
       .setTitle(`${EMOJIS.CLAIM} Ticket Réclamé`)
       .addFields(
+        { name: '🌐 Serveur', value: `**${guild.name}**`, inline: true },
         { name: '🎫 Salon', value: `<#${channel.id}>`, inline: true },
         { name: '👤 Pris en charge par', value: `<@${staffMember.id}>`, inline: true },
         { name: '🔢 Numéro', value: `#${String(ticket.ticket_number).padStart(4, '0')}`, inline: true }
@@ -74,6 +77,7 @@ class LogService {
       .setColor(COLORS.INFO)
       .setTitle(`${EMOJIS.ADD_USER} Membre Ajouté au Ticket`)
       .addFields(
+        { name: '🌐 Serveur', value: `**${guild.name}**`, inline: true },
         { name: '🎫 Salon', value: `<#${channel.id}>`, inline: true },
         { name: '👤 Membre ajouté', value: `<@${targetMember.id}>`, inline: true },
         { name: '🛡️ Action effectuée par', value: `<@${staffMember.id}>`, inline: true }
@@ -94,6 +98,7 @@ class LogService {
       .setColor(COLORS.WARNING)
       .setTitle(`${EMOJIS.REMOVE_USER} Membre Retiré du Ticket`)
       .addFields(
+        { name: '🌐 Serveur', value: `**${guild.name}**`, inline: true },
         { name: '🎫 Salon', value: `<#${channel.id}>`, inline: true },
         { name: '👤 Membre retiré', value: `<@${targetMember.id}>`, inline: true },
         { name: '🛡️ Action effectuée par', value: `<@${staffMember.id}>`, inline: true }
@@ -117,6 +122,7 @@ class LogService {
       .setColor(newPrio.color)
       .setTitle(`⚡ Priorité Modifiée`)
       .addFields(
+        { name: '🌐 Serveur', value: `**${guild.name}**`, inline: true },
         { name: '🎫 Salon', value: `<#${channel.id}>`, inline: true },
         { name: '🛡️ Modifié par', value: `<@${staffMember.id}>`, inline: true },
         { name: '📊 Évolution', value: `${oldPrio.emoji} ${oldPrio.label} ➔ ${newPrio.emoji} ${newPrio.label}`, inline: false }
@@ -137,6 +143,7 @@ class LogService {
       .setColor(COLORS.DANGER)
       .setTitle(`${EMOJIS.LOCK} Ticket Fermé`)
       .addFields(
+        { name: '🌐 Serveur', value: `**${guild.name}** (\`${guild.id}\`)`, inline: true },
         { name: '🎫 Nom du salon', value: `\`${channelName}\``, inline: true },
         { name: '🔢 Numéro', value: `#${String(ticket.ticket_number).padStart(4, '0')}`, inline: true },
         { name: '👤 Créateur', value: `<@${ticket.user_id}>`, inline: true },

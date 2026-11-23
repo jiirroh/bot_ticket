@@ -56,6 +56,19 @@ class TicketRepository {
   }
 
   /**
+   * Récupère la liste des tickets ouverts pour un serveur
+   * @param {string} guildId 
+   * @returns {Array}
+   */
+  getOpenTicketsByGuild(guildId) {
+    return db.prepare(`
+      SELECT * FROM tickets
+      WHERE guild_id = ? AND status = 'open'
+      ORDER BY created_at DESC
+    `).all(guildId);
+  }
+
+  /**
    * Compte le nombre de tickets ouverts d'un membre dans une catégorie
    * @param {string} guildId 
    * @param {string} userId 

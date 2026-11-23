@@ -1,11 +1,25 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const ticketService = require('../services/ticketService');
-const { PRIORITIES } = require('../config/constants');
+const ticketRepository = require('../db/repositories/ticketRepository');
+const embedBuilder = require('../utils/embedBuilder');
+const permissionHelper = require('../utils/permissionHelper');
+const { PRIORITIES, COLORS, EMOJIS } = require('../config/constants');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('ticket')
     .setDescription('Commandes de gestion et modération du ticket')
+    .addSubcommand(sub =>
+      sub
+        .setName('list')
+        .setDescription('Lister les tickets actuellement ouverts sur un serveur')
+        .addStringOption(option =>
+          option
+            .setName('serveur_id')
+            .setDescription('ID du serveur (laisser vide pour le serveur actuel)')
+            .setRequired(false)
+        )
+    )
     .addSubcommand(sub =>
       sub
         .setName('add')
@@ -70,6 +84,42 @@ module.exports = {
     const subcommand = interaction.options.getSubcommand();
 
     switch (subcommand) {
+      case 'list': {
+        if (!permissionHelper.isStaff(interaction.member)) {
+          return interaction.reply({
+            embeds: [embedBuilder.error('Seuls les membres du staff peuvent consulter la liste des tickets.')],
+            ephemeral: true
+          });
+        }
+
+        const customGuildId = interaction.options.getString('serveur_id');
+        const targetGuildId = customGuildId ? customGuildId.trim() : interaction.guild.id;
+        const targetGuild = await interaction.client.guilds.fetch(targetGuildId).catch(() => null);
+
+        const openTickets = ticketRepository.getOpenTicketsByGuild(targetGuildId);
+
+        if (openTickets.length === 0) {
+          return interaction.reply({
+            embeds: [embedBuilder.info(`Aucun ticket ouvert actuellement sur **${targetGuild ? targetGuild.name : targetGuildId}** !`)],
+            ephemeral: true
+          });
+        }
+
+        const lines = openTickets.map(t => {
+          const prio = Object.values(PRIORITIES).find(p => p.id === t.priority) || PRIORITIES.MEDIUM;
+          const claimedStr = t.claimed_by ? `(Réclamé par <@${t.claimed_by}>)` : '*(Non réclamé)*';
+          return `• **#${String(t.ticket_number).padStart(4, '0')}** <#${t.channel_id}> - <@${t.user_id}> | ${prio.emoji} ${prio.label} ${claimedStr}`;
+        });
+
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.PRIMARY)
+          .setTitle(`${EMOJIS.TICKET} Tickets Ouverts - ${targetGuild ? targetGuild.name : targetGuildId} (${openTickets.length})`)
+          .setDescription(lines.join('\n'))
+          .setTimestamp();
+
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+      }
+
       case 'add': {
         const targetUser = interaction.options.getUser('utilisateur');
         await ticketService.addMember(interaction, targetUser);

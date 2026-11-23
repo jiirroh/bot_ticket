@@ -29,14 +29,18 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     console.log(`\n[DÉPLOIEMENT] Début de l'enregistrement de ${commands.length} commande(s) Slash...`);
 
     if (process.env.GUILD_ID) {
-      // Déploiement instantané sur un serveur spécifique (idéal en développement)
-      const data = await rest.put(
-        Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-        { body: commands }
-      );
-      console.log(`[SUCCÈS] ${data.length} commandes enregistrées instantanément sur le serveur (GUILD_ID: ${process.env.GUILD_ID}) !`);
+      // Supporte un ou plusieurs IDs de serveurs séparés par des virgules (ex: Serveur Staff + Serveur Public)
+      const guildIds = process.env.GUILD_ID.split(',').map(id => id.trim()).filter(Boolean);
+
+      for (const gid of guildIds) {
+        const data = await rest.put(
+          Routes.applicationGuildCommands(process.env.CLIENT_ID, gid),
+          { body: commands }
+        );
+        console.log(`[SUCCÈS] ${data.length} commandes enregistrées instantanément sur le serveur (GUILD_ID: ${gid}) !`);
+      }
     } else {
-      // Déploiement global (peut prendre jusqu'à 1 heure pour être propagé partout)
+      // Déploiement global (actif sur tous les serveurs où le bot est présent)
       const data = await rest.put(
         Routes.applicationCommands(process.env.CLIENT_ID),
         { body: commands }

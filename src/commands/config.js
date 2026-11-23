@@ -12,23 +12,46 @@ const { COLORS, EMOJIS } = require('../config/constants');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('config')
-    .setDescription('Configuration du système de tickets (Administrateurs)')
+    .setDescription('Configuration du système de tickets (Administrateurs & Staff)')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addSubcommand(sub =>
       sub
+        .setName('servers')
+        .setDescription('Lister tous les serveurs connectés au bot et leurs identifiants')
+    )
+    .addSubcommand(sub =>
+      sub
         .setName('view')
-        .setDescription('Afficher la configuration actuelle du serveur')
+        .setDescription('Afficher la configuration actuelle d\'un serveur')
+        .addStringOption(opt =>
+          opt
+            .setName('serveur_id')
+            .setDescription('ID du serveur cible (laisser vide pour le serveur actuel)')
+            .setRequired(false)
+        )
     )
     .addSubcommand(sub =>
       sub
         .setName('logs')
-        .setDescription('Définir le salon où seront envoyés les logs de tickets')
+        .setDescription('Définir le salon de logs (peut être sur le serveur staff pour un autre serveur)')
         .addChannelOption(opt =>
           opt
             .setName('salon')
-            .setDescription('Le salon textuel de logs')
+            .setDescription('Le salon textuel où envoyer les logs')
             .addChannelTypes(ChannelType.GuildText)
-            .setRequired(true)
+            .setRequired(false)
+        )
+        .addStringOption(opt =>
+          opt
+            .setName('salon_id')
+            .setDescription('ID direct du salon de log (utile si situé sur un autre serveur)')
+            .setRequired(false)
+        )
+        .addStringOption(opt =>
+          opt
+            .setName('serveur_id')
+            .setDescription('ID du serveur dont on configure les logs (laisser vide pour le serveur actuel)')
+            .setRequired(false)
         )
     )
     .addSubcommand(sub =>
@@ -40,7 +63,19 @@ module.exports = {
             .setName('categorie')
             .setDescription('La catégorie Discord parente')
             .addChannelTypes(ChannelType.GuildCategory)
-            .setRequired(true)
+            .setRequired(false)
+        )
+        .addStringOption(opt =>
+          opt
+            .setName('categorie_id')
+            .setDescription('ID de la catégorie (utile si configuration à distance)')
+            .setRequired(false)
+        )
+        .addStringOption(opt =>
+          opt
+            .setName('serveur_id')
+            .setDescription('ID du serveur cible (laisser vide pour le serveur actuel)')
+            .setRequired(false)
         )
     )
     .addSubcommand(sub =>
@@ -61,13 +96,25 @@ module.exports = {
           opt
             .setName('role')
             .setDescription('Le rôle staff concerné')
-            .setRequired(true)
+            .setRequired(false)
+        )
+        .addStringOption(opt =>
+          opt
+            .setName('role_id')
+            .setDescription('ID direct du rôle (utile si configuration à distance)')
+            .setRequired(false)
+        )
+        .addStringOption(opt =>
+          opt
+            .setName('serveur_id')
+            .setDescription('ID du serveur cible (laisser vide pour le serveur actuel)')
+            .setRequired(false)
         )
     )
     .addSubcommand(sub =>
       sub
         .setName('ticket-types')
-        .setDescription('Gérer les catégories/types de tickets disponibles pour les membres')
+        .setDescription('Gérer les types de tickets disponibles')
         .addStringOption(opt =>
           opt
             .setName('action')
@@ -103,6 +150,12 @@ module.exports = {
             .setDescription('Emoji pour le menu (ex: 💡, 🛡️)')
             .setRequired(false)
         )
+        .addStringOption(opt =>
+          opt
+            .setName('serveur_id')
+            .setDescription('ID du serveur cible (laisser vide pour le serveur actuel)')
+            .setRequired(false)
+        )
     )
     .addSubcommand(sub =>
       sub
@@ -115,6 +168,12 @@ module.exports = {
             .setMinValue(0)
             .setMaxValue(60)
             .setRequired(true)
+        )
+        .addStringOption(opt =>
+          opt
+            .setName('serveur_id')
+            .setDescription('ID du serveur cible (laisser vide pour le serveur actuel)')
+            .setRequired(false)
         )
     )
     .addSubcommand(sub =>
@@ -129,6 +188,12 @@ module.exports = {
             .setMaxValue(10)
             .setRequired(true)
         )
+        .addStringOption(opt =>
+          opt
+            .setName('serveur_id')
+            .setDescription('ID du serveur cible (laisser vide pour le serveur actuel)')
+            .setRequired(false)
+        )
     )
     .addSubcommand(sub =>
       sub
@@ -142,15 +207,63 @@ module.exports = {
             .setMaxValue(3600)
             .setRequired(true)
         )
+        .addStringOption(opt =>
+          opt
+            .setName('serveur_id')
+            .setDescription('ID du serveur cible (laisser vide pour le serveur actuel)')
+            .setRequired(false)
+        )
     ),
 
   /**
+   * Résout le serveur cible (soit serveur_id passé en paramètre, soit le serveur où la commande est exécutée)
+   */
+  async resolveTargetGuild(interaction) {
+    const customGuildId = interaction.options.getString('serveur_id');
+    if (!customGuildId) {
+      return { guildId: interaction.guild.id, guildName: interaction.guild.name };
+    }
+
+    const cleanId = customGuildId.trim();
+    const fetchedGuild = await interaction.client.guilds.fetch(cleanId).catch(() => null);
+    if (!fetchedGuild) {
+      return { 
+        guildId: cleanId, 
+        guildName: `Serveur inconnu ou non partagé (${cleanId})`, 
+        error: `Le bot ne se trouve pas sur le serveur ayant pour identifiant \`${cleanId}\`.` 
+      };
+    }
+    return { guildId: fetchedGuild.id, guildName: fetchedGuild.name };
+  },
+
+  /**
    * Exécution de la commande /config
-   * @param {import('discord.js').ChatInputCommandInteraction} interaction 
    */
   async execute(interaction) {
     const subcommand = interaction.options.getSubcommand();
-    const guildId = interaction.guild.id;
+
+    // 1. Lister tous les serveurs du bot
+    if (subcommand === 'servers') {
+      const guilds = interaction.client.guilds.cache;
+      const list = guilds.map(g => `• **${g.name}**\n  - ID : \`${g.id}\`\n  - Membres : ${g.memberCount}`).join('\n\n');
+
+      const embed = new EmbedBuilder()
+        .setColor(COLORS.PRIMARY)
+        .setTitle(`🌐 Serveurs connectés au bot (${guilds.size})`)
+        .setDescription(list || 'Aucun serveur détecté.')
+        .setFooter({ text: 'Copiez un ID pour le renseigner dans l\'option serveur_id de /config' });
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Résolution du serveur cible
+    const { guildId, guildName, error } = await this.resolveTargetGuild(interaction);
+    if (error) {
+      return interaction.reply({
+        embeds: [embedBuilder.error(error)],
+        ephemeral: true
+      });
+    }
 
     switch (subcommand) {
       case 'view': {
@@ -159,7 +272,7 @@ module.exports = {
         const categories = configRepository.getTicketCategories(guildId);
 
         const staffRolesList = staffRoles.length > 0 
-          ? staffRoles.map(id => `<@&${id}>`).join(', ') 
+          ? staffRoles.map(id => `<@&${id}> (\`${id}\`)`).join(', ') 
           : '*Aucun rôle configuré (Administrateurs uniquement)*';
 
         const categoriesList = categories.length > 0
@@ -168,36 +281,67 @@ module.exports = {
 
         const embed = new EmbedBuilder()
           .setColor(COLORS.PRIMARY)
-          .setTitle(`${EMOJIS.SETTINGS} Configuration des Tickets - ${interaction.guild.name}`)
+          .setTitle(`${EMOJIS.SETTINGS} Configuration des Tickets - ${guildName}`)
+          .setDescription(`Identifiant du serveur : \`${guildId}\``)
           .addFields(
-            { name: '📜 Salon de logs', value: config.log_channel_id ? `<#${config.log_channel_id}>` : '*Non configuré*', inline: true },
-            { name: '📂 Catégorie Discord', value: config.ticket_category_id ? `<#${config.ticket_category_id}>` : '*Racine du serveur*', inline: true },
+            { name: '📜 Salon de logs', value: config.log_channel_id ? `<#${config.log_channel_id}> (\`${config.log_channel_id}\`)` : '*Non configuré*', inline: true },
+            { name: '📂 Catégorie Discord', value: config.ticket_category_id ? `<#${config.ticket_category_id}> (\`${config.ticket_category_id}\`)` : '*Racine du serveur*', inline: true },
             { name: '⏱️ Délai de suppression', value: `${config.close_delay_seconds || 5} seconde(s)`, inline: true },
             { name: '🛑 Limite par catégorie', value: `${config.max_tickets_per_category || 1} ticket(s) max`, inline: true },
             { name: '⏳ Cooldown anti-spam', value: `${config.cooldown_seconds || 60} seconde(s)`, inline: true },
             { name: '🛡️ Rôles Staff autorisés', value: staffRolesList, inline: false },
             { name: '🗂️ Types de tickets configurés', value: categoriesList, inline: false }
           )
-          .setFooter({ text: 'Utilisez /config <paramètre> pour modifier ces valeurs.' })
+          .setFooter({ text: 'Utilisez /config <paramètre> serveur_id:<id> pour modifier ces valeurs.' })
           .setTimestamp();
 
         return interaction.reply({ embeds: [embed], ephemeral: true });
       }
 
       case 'logs': {
-        const channel = interaction.options.getChannel('salon');
-        configRepository.updateGuildConfig(guildId, { log_channel_id: channel.id });
+        const channelOption = interaction.options.getChannel('salon');
+        const channelIdOption = interaction.options.getString('salon_id');
+
+        const resolvedChannelId = channelOption ? channelOption.id : (channelIdOption ? channelIdOption.trim() : null);
+
+        if (!resolvedChannelId) {
+          return interaction.reply({
+            embeds: [embedBuilder.error('Veuillez spécifier soit un salon via `salon`, soit un identifiant via `salon_id`.')],
+            ephemeral: true
+          });
+        }
+
+        // Vérification que le bot a accès à ce salon
+        const channelObj = await interaction.client.channels.fetch(resolvedChannelId).catch(() => null);
+        if (!channelObj || !channelObj.isTextBased()) {
+          return interaction.reply({
+            embeds: [embedBuilder.error(`Le bot n'a pas accès au salon \`${resolvedChannelId}\` ou ce n'est pas un salon textuel.`)],
+            ephemeral: true
+          });
+        }
+
+        configRepository.updateGuildConfig(guildId, { log_channel_id: resolvedChannelId });
         return interaction.reply({
-          embeds: [embedBuilder.success(`Le salon de logs a été défini sur <#${channel.id}>.`)],
+          embeds: [embedBuilder.success(`Le salon de logs pour **${guildName}** a été défini sur <#${resolvedChannelId}> (Serveur : **${channelObj.guild.name}**).`)],
           ephemeral: true
         });
       }
 
       case 'category': {
         const categoryChannel = interaction.options.getChannel('categorie');
-        configRepository.updateGuildConfig(guildId, { ticket_category_id: categoryChannel.id });
+        const categoryIdOption = interaction.options.getString('categorie_id');
+        const targetCategoryId = categoryChannel ? categoryChannel.id : (categoryIdOption ? categoryIdOption.trim() : null);
+
+        if (!targetCategoryId) {
+          return interaction.reply({
+            embeds: [embedBuilder.error('Veuillez spécifier une catégorie via `categorie` ou `categorie_id`.')],
+            ephemeral: true
+          });
+        }
+
+        configRepository.updateGuildConfig(guildId, { ticket_category_id: targetCategoryId });
         return interaction.reply({
-          embeds: [embedBuilder.success(`La catégorie par défaut pour les tickets a été définie sur **${categoryChannel.name}**.`)],
+          embeds: [embedBuilder.success(`La catégorie par défaut pour les tickets de **${guildName}** a été définie sur l'ID \`${targetCategoryId}\`.`)],
           ephemeral: true
         });
       }
@@ -205,17 +349,26 @@ module.exports = {
       case 'staff-role': {
         const action = interaction.options.getString('action');
         const role = interaction.options.getRole('role');
+        const roleIdOption = interaction.options.getString('role_id');
+        const targetRoleId = role ? role.id : (roleIdOption ? roleIdOption.trim() : null);
+
+        if (!targetRoleId) {
+          return interaction.reply({
+            embeds: [embedBuilder.error('Veuillez spécifier un rôle via `role` ou `role_id`.')],
+            ephemeral: true
+          });
+        }
 
         if (action === 'add') {
-          configRepository.addStaffRole(guildId, role.id);
+          configRepository.addStaffRole(guildId, targetRoleId);
           return interaction.reply({
-            embeds: [embedBuilder.success(`Le rôle <@&${role.id}> a été ajouté à l'équipe Staff.`)],
+            embeds: [embedBuilder.success(`Le rôle \`${targetRoleId}\` a été ajouté au staff de **${guildName}**.`)],
             ephemeral: true
           });
         } else {
-          configRepository.removeStaffRole(guildId, role.id);
+          configRepository.removeStaffRole(guildId, targetRoleId);
           return interaction.reply({
-            embeds: [embedBuilder.success(`Le rôle <@&${role.id}> a été retiré de l'équipe Staff.`)],
+            embeds: [embedBuilder.success(`Le rôle \`${targetRoleId}\` a été retiré du staff de **${guildName}**.`)],
             ephemeral: true
           });
         }
@@ -232,7 +385,7 @@ module.exports = {
           const categories = configRepository.getTicketCategories(guildId);
           const listText = categories.map(c => `• **${c.emoji || '📁'} ${c.label}** (\`${c.category_id}\`)\n  _${c.description || 'Pas de description'}_`).join('\n\n');
           return interaction.reply({
-            embeds: [embedBuilder.info(`**Types de tickets existants :**\n\n${listText}`)],
+            embeds: [embedBuilder.info(`**Types de tickets existants sur ${guildName} :**\n\n${listText}`)],
             ephemeral: true
           });
         }
@@ -254,7 +407,7 @@ module.exports = {
           });
 
           return interaction.reply({
-            embeds: [embedBuilder.success(`La catégorie **${nom}** (\`${cleanId}\`) a été enregistrée avec succès.`)],
+            embeds: [embedBuilder.success(`La catégorie **${nom}** (\`${cleanId}\`) a été enregistrée pour **${guildName}**.`)],
             ephemeral: true
           });
         }
@@ -269,7 +422,7 @@ module.exports = {
 
           configRepository.removeTicketCategory(guildId, id.toLowerCase());
           return interaction.reply({
-            embeds: [embedBuilder.success(`La catégorie de ticket \`${id}\` a été supprimée.`)],
+            embeds: [embedBuilder.success(`La catégorie de ticket \`${id}\` a été supprimée de **${guildName}**.`)],
             ephemeral: true
           });
         }
@@ -280,7 +433,7 @@ module.exports = {
         const delay = interaction.options.getInteger('secondes');
         configRepository.updateGuildConfig(guildId, { close_delay_seconds: delay });
         return interaction.reply({
-          embeds: [embedBuilder.success(`Le délai avant suppression du salon a été réglé à **${delay} seconde(s)**.`)],
+          embeds: [embedBuilder.success(`Le délai de suppression pour **${guildName}** a été réglé à **${delay} seconde(s)**.`)],
           ephemeral: true
         });
       }
@@ -289,7 +442,7 @@ module.exports = {
         const limit = interaction.options.getInteger('nombre');
         configRepository.updateGuildConfig(guildId, { max_tickets_per_category: limit });
         return interaction.reply({
-          embeds: [embedBuilder.success(`La limite a été définie sur **${limit} ticket(s)** ouvert(s) par utilisateur et par catégorie.`)],
+          embeds: [embedBuilder.success(`La limite pour **${guildName}** a été définie sur **${limit} ticket(s)** par membre.`)],
           ephemeral: true
         });
       }
@@ -298,7 +451,7 @@ module.exports = {
         const cooldownVal = interaction.options.getInteger('secondes');
         configRepository.updateGuildConfig(guildId, { cooldown_seconds: cooldownVal });
         return interaction.reply({
-          embeds: [embedBuilder.success(`Le cooldown anti-spam a été défini sur **${cooldownVal} seconde(s)**.`)],
+          embeds: [embedBuilder.success(`Le cooldown anti-spam pour **${guildName}** a été défini sur **${cooldownVal} seconde(s)**.`)],
           ephemeral: true
         });
       }
