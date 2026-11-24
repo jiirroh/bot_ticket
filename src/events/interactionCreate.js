@@ -2,6 +2,11 @@ const {
   ActionRowBuilder, 
   StringSelectMenuBuilder, 
   UserSelectMenuBuilder,
+  ChannelSelectMenuBuilder,
+  RoleSelectMenuBuilder,
+  ChannelType,
+  ButtonBuilder,
+  ButtonStyle,
   ModalBuilder, 
   TextInputBuilder, 
   TextInputStyle 
@@ -11,6 +16,7 @@ const configRepository = require('../db/repositories/configRepository');
 const ticketService = require('../services/ticketService');
 const embedBuilder = require('../utils/embedBuilder');
 const { EMOJIS } = require('../config/constants');
+const { buildSetupDashboard } = require('../commands/setup');
 
 module.exports = {
   name: 'interactionCreate',
@@ -38,6 +44,72 @@ module.exports = {
       if (interaction.isButton()) {
         const customId = interaction.customId;
 
+        // --- BOUTONS DU DASHBOARD /SETUP ---
+        if (customId === 'setup_btn_logs') {
+          const row = new ActionRowBuilder().addComponents(
+            new ChannelSelectMenuBuilder()
+              .setCustomId('setup_select_logs')
+              .setPlaceholder('Sélectionnez le salon textuel pour les logs...')
+              .setChannelTypes(ChannelType.GuildText)
+          );
+          return interaction.reply({
+            content: 'Choisissez le salon où vous souhaitez recevoir tous les logs de tickets :',
+            components: [row],
+            ephemeral: true
+          });
+        }
+
+        if (customId === 'setup_btn_category') {
+          const row = new ActionRowBuilder().addComponents(
+            new ChannelSelectMenuBuilder()
+              .setCustomId('setup_select_category')
+              .setPlaceholder('Sélectionnez la catégorie Discord pour les tickets...')
+              .setChannelTypes(ChannelType.GuildCategory)
+          );
+          return interaction.reply({
+            content: 'Choisissez la catégorie Discord sous laquelle seront créés les salons de tickets :',
+            components: [row],
+            ephemeral: true
+          });
+        }
+
+        if (customId === 'setup_btn_staff') {
+          const row = new ActionRowBuilder().addComponents(
+            new RoleSelectMenuBuilder()
+              .setCustomId('setup_select_staff_role')
+              .setPlaceholder('Sélectionnez le ou les rôles Staff...')
+              .setMinValues(1)
+              .setMaxValues(5)
+          );
+          return interaction.reply({
+            content: 'Sélectionnez les rôles autorisés à gérer les tickets (claim, fermer, commandes staff) :',
+            components: [row],
+            ephemeral: true
+          });
+        }
+
+        if (customId === 'setup_btn_panel') {
+          const row = new ActionRowBuilder().addComponents(
+            new ChannelSelectMenuBuilder()
+              .setCustomId('setup_select_panel_channel')
+              .setPlaceholder('Sélectionnez le salon où poster le panneau...')
+              .setChannelTypes(ChannelType.GuildText)
+          );
+          return interaction.reply({
+            content: 'Dans quel salon souhaitez-vous déployer le panneau "Ouvrir un ticket" ?',
+            components: [row],
+            ephemeral: true
+          });
+        }
+
+        if (customId === 'setup_btn_refresh') {
+          const dashboard = buildSetupDashboard(interaction.guild);
+          return interaction.update({
+            ...dashboard
+          });
+        }
+
+        // --- GESTION DU SYSTÈME DE TICKETS ---
         // Clic sur "Ouvrir un ticket" -> Proposer le menu des catégories
         if (customId === 'ticket_create_btn') {
           const categories = configRepository.getTicketCategories(interaction.guild.id);
@@ -109,7 +181,79 @@ module.exports = {
         }
       }
 
-      // 3. GESTION DES MENUS DÉROULANTS (SELECT MENUS)
+      // 3. GESTION DES MENUS DÉROULANTS DE CANAUX (CHANNEL SELECT)
+      if (interaction.isChannelSelectMenu()) {
+        const guildId = interaction.guild.id;
+
+        // Configuration du salon de logs via /setup
+        if (interaction.customId === 'setup_select_logs') {
+          const channelId = interaction.values[0];
+          configRepository.updateGuildConfig(guildId, { log_channel_id: channelId });
+          return interaction.update({
+            content: `✅ Le salon de logs a été défini sur <#${channelId}> avec succès !\nUtilisez le bouton **Actualiser** sur le panneau pour voir le changement.`,
+            components: []
+          });
+        }
+
+        // Configuration de la catégorie de tickets via /setup
+        if (interaction.customId === 'setup_select_category') {
+          const categoryId = interaction.values[0];
+          configRepository.updateGuildConfig(guildId, { ticket_category_id: categoryId });
+          return interaction.update({
+            content: `✅ La catégorie parente pour les tickets a été définie sur <#${categoryId}> !\nUtilisez le bouton **Actualiser** sur le panneau pour voir le changement.`,
+            components: []
+          });
+        }
+
+        // Déploiement automatique du panneau dans le salon choisi
+        if (interaction.customId === 'setup_select_panel_channel') {
+          const channelId = interaction.values[0];
+          const targetChannel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+
+          if (!targetChannel || !targetChannel.isTextBased()) {
+            return interaction.update({
+              content: '❌ Salon invalide ou introuvable.',
+              components: []
+            });
+          }
+
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId('ticket_create_btn')
+              .setLabel('Ouvrir un ticket')
+              .setEmoji(EMOJIS.TICKET)
+              .setStyle(ButtonStyle.Primary)
+          );
+
+          const panelEmbed = embedBuilder.panel(interaction.guild.name);
+          await targetChannel.send({
+            embeds: [panelEmbed],
+            components: [row]
+          });
+
+          return interaction.update({
+            content: `🎉 Le panneau d'assistance a été posté dans <#${channelId}> avec succès !`,
+            components: []
+          });
+        }
+      }
+
+      // 4. GESTION DES MENUS DÉROULANTS DE RÔLES (ROLE SELECT)
+      if (interaction.isRoleSelectMenu()) {
+        if (interaction.customId === 'setup_select_staff_role') {
+          const selectedRoles = interaction.values;
+          for (const roleId of selectedRoles) {
+            configRepository.addStaffRole(interaction.guild.id, roleId);
+          }
+          const rolesText = selectedRoles.map(id => `<@&${id}>`).join(', ');
+          return interaction.update({
+            content: `✅ Rôle(s) Staff ajouté(s) : ${rolesText}\nUtilisez le bouton **Actualiser** sur le panneau pour voir le changement.`,
+            components: []
+          });
+        }
+      }
+
+      // 5. GESTION DES MENUS STRING SELECT (TYPES DE TICKETS)
       if (interaction.isStringSelectMenu()) {
         // Choix de la catégorie -> Ouverture du formulaire Modal pour le motif
         if (interaction.customId === 'ticket_category_select') {
@@ -145,7 +289,7 @@ module.exports = {
         }
       }
 
-      // 4. GESTION DE LA SÉLECTION D'UTILISATEUR (USER SELECT)
+      // 6. GESTION DE LA SÉLECTION D'UTILISATEUR (USER SELECT)
       if (interaction.isUserSelectMenu()) {
         if (interaction.customId.startsWith('ticket_user_select:')) {
           const targetUserId = interaction.values[0];
@@ -162,7 +306,7 @@ module.exports = {
         }
       }
 
-      // 5. GESTION DES MODALS
+      // 7. GESTION DES MODALS
       if (interaction.isModalSubmit()) {
         if (interaction.customId.startsWith('ticket_modal:')) {
           const categoryId = interaction.customId.split(':')[1];
